@@ -19,6 +19,18 @@ local mainAlwaysTrackHasKnownSpell = nil
 local mainAlwaysTrackRetryAt = nil
 local MAIN_ALWAYS_TRACK_RETRY_BUFFER_SECONDS = 0.2
 
+local function MainAlwaysTrack_IsPlayerDead()
+	if UnitIsDead and UnitIsDead("player") then
+		return 1
+	end
+
+	if UnitHealth and UnitHealth("player") == 0 then
+		return 1
+	end
+
+	return nil
+end
+
 local function MainAlwaysTrack_FindSpellByName(spellName)
 	local bookIndex
 	local bookType
@@ -136,6 +148,11 @@ end
 
 local function MainAlwaysTrack_ShouldMaintainTracking()
 	if not Main.IsModuleEnabled("always_track") then
+		mainAlwaysTrackRetryAt = nil
+		return nil
+	end
+
+	if MainAlwaysTrack_IsPlayerDead() then
 		mainAlwaysTrackRetryAt = nil
 		return nil
 	end

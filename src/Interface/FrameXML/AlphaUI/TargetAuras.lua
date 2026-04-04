@@ -37,6 +37,10 @@ local mainTargetAurasPlayerGainsDebuff = AURAADDEDSELFHARMFUL and Main_StringGSu
 local mainTargetAurasPlayerLosesAura = AURAREMOVEDSELF and Main_StringGSub(format(AURAREMOVEDSELF, ""), "%.", "") or nil
 local mainTargetAurasPlayerChangesAura = AURACHANGEDSELF and Main_StringGSub(format(AURACHANGEDSELF, "", ""), "%.", "") or nil
 
+local function MainTargetAuras_IsPlayerDead()
+	return Main.API and Main.API.IsPlayerDead and Main.API:IsPlayerDead()
+end
+
 local function MainTargetAuras_GetRemainingSeconds(aura)
 	local remaining
 
@@ -305,6 +309,7 @@ local function MainTargetAuras_UpdateDisplay()
 	end
 
 	if not TargetFrame or not TargetFrame:IsVisible() or not UnitExists("target") or
+		MainTargetAuras_IsPlayerDead() or
 		((UnitIsDead and UnitIsDead("target")) or (UnitHealth and UnitHealth("target") == 0)) then
 		MainTargetAurasFrame:Hide()
 		return
@@ -320,6 +325,13 @@ end
 
 local function MainTargetAuras_RequestSnapshot(force)
 	if not MainTargetAuras_ShouldShow() or not Main.API or not Main.API.RequestUnitAuras or not UnitExists or not UnitExists("target") then
+		return
+	end
+
+	if MainTargetAuras_IsPlayerDead() then
+		if Main.API.ResetUnitAuras then
+			Main.API:ResetUnitAuras("target")
+		end
 		return
 	end
 
@@ -412,6 +424,9 @@ function MainTargetAurasFrame_OnLoad()
 	this.refreshElapsed = 0
 	this:RegisterEvent("PLAYER_ENTERING_WORLD")
 	this:RegisterEvent("PLAYER_TARGET_CHANGED")
+	this:RegisterEvent("PLAYER_DEAD")
+	this:RegisterEvent("PLAYER_ALIVE")
+	this:RegisterEvent("PLAYER_UNGHOST")
 	this:RegisterEvent("CHAT_MSG_COMBAT_LOG_ENEMY")
 	this:RegisterEvent("CHAT_MSG_COMBAT_LOG_SELF")
 	this:RegisterEvent("CHAT_MSG_COMBAT_LOG_PARTY")
@@ -419,7 +434,8 @@ function MainTargetAurasFrame_OnLoad()
 end
 
 function MainTargetAurasFrame_OnEvent(event)
-	if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_TARGET_CHANGED" then
+	if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_TARGET_CHANGED"
+		or event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" or event == "PLAYER_UNGHOST" then
 		if Main.API and Main.API.ResetUnitAuras then
 			Main.API:ResetUnitAuras("target")
 		end
@@ -457,6 +473,17 @@ function MainTargetAurasFrame_OnUpdate(elapsed)
 	end
 
 	if not UnitExists or not UnitExists("target") then
+		if Main.API and Main.API.ResetUnitAuras then
+			Main.API:ResetUnitAuras("target")
+		end
+		MainTargetAurasFrame:Hide()
+		return
+	end
+
+	if MainTargetAuras_IsPlayerDead() then
+		if Main.API and Main.API.ResetUnitAuras then
+			Main.API:ResetUnitAuras("target")
+		end
 		MainTargetAurasFrame:Hide()
 		return
 	end

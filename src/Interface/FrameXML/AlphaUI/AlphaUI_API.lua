@@ -395,6 +395,18 @@ function Main.API:ResetUnitAuras(unitId)
 	end
 end
 
+function Main.API:IsPlayerDead()
+	if UnitIsDead and UnitIsDead("player") then
+		return 1
+	end
+
+	if UnitHealth and UnitHealth("player") == 0 then
+		return 1
+	end
+
+	return nil
+end
+
 function Main.API:RequestUnitAuras(unitId, force)
 	local state
 	local now
@@ -407,6 +419,10 @@ function Main.API:RequestUnitAuras(unitId, force)
 
 	safeUnitId = unitId or "target"
 	if not UnitExists or not UnitExists(safeUnitId) then
+		return nil
+	end
+	if self:IsPlayerDead() then
+		self:ResetUnitAuras(safeUnitId)
 		return nil
 	end
 	if self.handshake and self.handshake.completed and not self:IsServerApiSupported("auras") then
