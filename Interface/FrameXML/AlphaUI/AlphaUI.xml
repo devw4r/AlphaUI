@@ -1792,6 +1792,15 @@
 					</OnClick>
 				</Scripts>
 			</Button>
+			<Frame name="MainMergedBagsFrameMoneyFrame" inherits="SmallMoneyFrameTemplate">
+				<Anchors>
+					<Anchor point="BOTTOMRIGHT">
+						<Offset>
+							<AbsDimension x="-10" y="10"/>
+						</Offset>
+					</Anchor>
+				</Anchors>
+			</Frame>
 			<Frame name="MainMergedBagsFrameBag0" inherits="MainMergedBagsBagTemplate" id="0"/>
 			<Frame name="MainMergedBagsFrameBag1" inherits="MainMergedBagsBagTemplate" id="1"/>
 			<Frame name="MainMergedBagsFrameBag2" inherits="MainMergedBagsBagTemplate" id="2"/>

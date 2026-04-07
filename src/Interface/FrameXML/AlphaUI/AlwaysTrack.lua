@@ -9,15 +9,16 @@ local mainAlwaysTrackBookTypes = {
 }
 
 local mainAlwaysTrackTrackedSpells = {
-	{ label = "Find Herbs", spellName = "Find Herbs", spellId = 2383 },
-	{ label = "Find Minerals", spellName = "Find Minerals", spellId = 2580 },
-	{ label = "Find Treasure", spellName = "Find Treasure", spellId = 2481 },
+	{ label = "Find Herbs", spellName = "Find Herbs", spellId = 2383, textures = { "Interface\\Icons\\Spell_Nature_NatureTouchGrow" } },
+	{ label = "Find Minerals", spellName = "Find Minerals", spellId = 2580, textures = { "Interface\\Icons\\Spell_Nature_Earthquake" } },
+	{ label = "Find Treasure", spellName = "Find Treasure", spellId = 2481, textures = { "Interface\\Icons\\Racial_Dwarf_FindTreasure" } },
 }
 
 local mainAlwaysTrackKnownSpells = {}
 local mainAlwaysTrackHasKnownSpell = nil
 local mainAlwaysTrackRetryAt = nil
 local MAIN_ALWAYS_TRACK_RETRY_BUFFER_SECONDS = 0.2
+local MAIN_ALWAYS_TRACK_BUFF_FILTER = "HELPFUL|PASSIVE"
 
 local function MainAlwaysTrack_IsPlayerDead()
 	if UnitIsDead and UnitIsDead("player") then
@@ -89,6 +90,7 @@ local function MainAlwaysTrack_RefreshKnownSpells()
 				slot = slot,
 				bookType = bookType,
 				texture = texture,
+				textures = spellInfo.textures,
 			})
 			hasKnownSpell = 1
 		end
@@ -113,7 +115,7 @@ local function MainAlwaysTrack_GetActiveBuffTextures()
 	end
 
 	for buffIndex = 0, 15 do
-		activeBuffIndex = GetPlayerBuff(buffIndex, "HELPFUL")
+		activeBuffIndex = GetPlayerBuff(buffIndex, MAIN_ALWAYS_TRACK_BUFF_FILTER)
 		if activeBuffIndex and activeBuffIndex >= 0 then
 			buffTexture = GetPlayerBuffTexture(activeBuffIndex)
 			if buffTexture then
@@ -123,6 +125,30 @@ local function MainAlwaysTrack_GetActiveBuffTextures()
 	end
 
 	return activeTextures
+end
+
+local function MainAlwaysTrack_IsSpellTextureActive(knownSpell, activeBuffTextures)
+	local textureIndex
+	local texture
+
+	if not knownSpell or not activeBuffTextures then
+		return nil
+	end
+
+	if knownSpell.texture and activeBuffTextures[knownSpell.texture] then
+		return 1
+	end
+
+	if knownSpell.textures then
+		for textureIndex = 1, Main_ArrayCount(knownSpell.textures) do
+			texture = knownSpell.textures[textureIndex]
+			if texture and activeBuffTextures[texture] then
+				return 1
+			end
+		end
+	end
+
+	return nil
 end
 
 local function MainAlwaysTrack_GetMissingKnownSpells()
@@ -137,7 +163,7 @@ local function MainAlwaysTrack_GetMissingKnownSpells()
 	for spellIndex = 1, Main_ArrayCount(mainAlwaysTrackKnownSpells) do
 		knownSpell = mainAlwaysTrackKnownSpells[spellIndex]
 		if knownSpell and knownSpell.slot and knownSpell.bookType then
-			if not knownSpell.texture or not activeBuffTextures[knownSpell.texture] then
+			if not MainAlwaysTrack_IsSpellTextureActive(knownSpell, activeBuffTextures) then
 				Main_ArrayInsert(missingSpells, knownSpell)
 			end
 		end

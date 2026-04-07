@@ -1988,7 +1988,6 @@ do
 local MainActionBars = {
 	name = "Action Bars",
 	description = "Applies the custom stock-bar layout and bag/microbutton tweaks.",
-	reloadRequired = 1,
 	options = {
 		{
 			type = "number",
@@ -2011,6 +2010,8 @@ local mainActionBarsOriginalShapeshiftBarUpdate = nil
 local mainActionBarsOriginalMainMenuExpBarUpdate = nil
 local mainActionBarsOriginalPaperDollItemSlotButtonUpdateLock = nil
 local mainActionBarsOriginalGameTooltipSetOwner = nil
+local MAIN_ACTION_BARS_PET_RETRY_SECONDS = 8
+local MAIN_ACTION_BARS_PET_RETRY_INTERVAL = 0.25
 local MAIN_ACTION_BARS_MICRO_BUTTONS = {
 	"CharacterMicroButton",
 	"SpellbookMicroButton",
@@ -2065,7 +2066,7 @@ local function MainActionBars_CaptureWidgetState(key, widget)
 	}
 end
 
-local function MainActionBars_RestoreWidgetState(key, widget)
+local function MainActionBars_RestoreWidgetState(key, widget, skipVisibility)
 	local state
 	local relativeTo
 
@@ -2098,7 +2099,7 @@ local function MainActionBars_RestoreWidgetState(key, widget)
 	if state.enabledMouse ~= nil and widget.EnableMouse then
 		widget:EnableMouse(state.enabledMouse and 1 or 0)
 	end
-	if state.shown ~= nil then
+	if state.shown ~= nil and not skipVisibility then
 		if state.shown then
 			widget:Show()
 		else
@@ -2139,7 +2140,7 @@ local function MainActionBars_CaptureTextureState(key, texture)
 	}
 end
 
-local function MainActionBars_RestoreTextureState(key, texture)
+local function MainActionBars_RestoreTextureState(key, texture, skipVisibility)
 	local state
 	local relativeTo
 
@@ -2169,7 +2170,7 @@ local function MainActionBars_RestoreTextureState(key, texture)
 		relativeTo = state.relativeToName or state.parentName or "UIParent"
 		texture:SetPoint(state.point, relativeTo, state.relativePoint or state.point, state.xOffset or 0, state.yOffset or 0)
 	end
-	if state.shown ~= nil then
+	if state.shown ~= nil and not skipVisibility then
 		if state.shown then
 			texture:Show()
 		else
@@ -2221,6 +2222,70 @@ end
 local function MainActionBars_UpdateContainerAnchors()
 	if updateContainerFrameAnchors then
 		updateContainerFrameAnchors()
+	end
+end
+
+local function MainActionBars_RefreshPetActionBar()
+	local hasPetBar
+	local bonusOffset
+
+	if not PetActionBarFrame or not PetHasActionBar then
+		return
+	end
+
+	MainActionBars.inPetBarRefresh = true
+	if PetActionBar_Update then
+		PetActionBar_Update()
+	end
+
+	hasPetBar = PetHasActionBar()
+	if GetBonusBarOffset then
+		bonusOffset = GetBonusBarOffset()
+	end
+
+	if hasPetBar and not (bonusOffset and bonusOffset > 0) then
+		if UnlockPetActionBar then
+			UnlockPetActionBar()
+		end
+		if ShowPetActionBar then
+			ShowPetActionBar()
+		else
+			PetActionBarFrame:Show()
+		end
+		if PetActionBarFrame.IsVisible and not PetActionBarFrame:IsVisible() then
+			PetActionBarFrame:Show()
+		end
+		if LockPetActionBar then
+			LockPetActionBar()
+		end
+	else
+		if UnlockPetActionBar then
+			UnlockPetActionBar()
+		end
+		if HidePetActionBar then
+			HidePetActionBar()
+		else
+			PetActionBarFrame:Hide()
+		end
+	end
+	MainActionBars.inPetBarRefresh = nil
+	if hasPetBar and not (bonusOffset and bonusOffset > 0) and PetActionBarFrame.IsVisible then
+		return PetActionBarFrame:IsVisible()
+	end
+	return hasPetBar
+end
+
+local function MainActionBars_RequestPetActionBarRefresh(seconds)
+	local now
+
+	MainActionBars.pendingPetBarRefresh = true
+	MainActionBars.nextPetBarRefresh = nil
+
+	if GetTime then
+		now = GetTime()
+		MainActionBars.petBarRefreshUntil = now + (seconds or MAIN_ACTION_BARS_PET_RETRY_SECONDS)
+	else
+		MainActionBars.petBarRefreshUntil = nil
 	end
 end
 
@@ -2492,6 +2557,7 @@ local function MainActionBars_ApplyStockLayoutFixes()
 	SlidingActionBarTexture0:SetPoint("TOPLEFT", "PetActionBarFrame", "TOPLEFT", 0, 0)
 	PetActionButton1:ClearAllPoints()
 	PetActionButton1:SetPoint("BOTTOMLEFT", "PetActionBarFrame", "BOTTOMLEFT", 36, 1)
+	MainActionBars_RefreshPetActionBar()
 	ShapeshiftBarLeft:ClearAllPoints()
 	ShapeshiftBarLeft:SetPoint("BOTTOMLEFT", "ShapeshiftBarFrame", "BOTTOMLEFT", 0, 0)
 	ShapeshiftButton1:ClearAllPoints()
@@ -2521,6 +2587,7 @@ local function MainActionBars_ApplyAlternativeLayout()
 	SlidingActionBarTexture0:SetPoint("TOPLEFT", "PetActionBarFrame", "TOPLEFT", 0, 0)
 	PetActionButton1:ClearAllPoints()
 	PetActionButton1:SetPoint("TOP", "PetActionBarFrame", "LEFT", 51, 9)
+	MainActionBars_RefreshPetActionBar()
 
 	ShapeshiftBarLeft:ClearAllPoints()
 	ShapeshiftBarLeft:SetPoint("BOTTOMLEFT", "ShapeshiftBarFrame", "BOTTOMLEFT", 0, 0)
@@ -2580,10 +2647,10 @@ local function MainActionBars_RestoreAlternativeLayout()
 
 	MainActionBars_RestoreWidgetState("MainMenuBar", MainMenuBar)
 	MainActionBars_RestoreWidgetState("ActionButton1", ActionButton1)
-	MainActionBars_RestoreTextureState("SlidingActionBarTexture0", SlidingActionBarTexture0)
-	MainActionBars_RestoreWidgetState("PetActionButton1", PetActionButton1)
-	MainActionBars_RestoreTextureState("ShapeshiftBarLeft", ShapeshiftBarLeft)
-	MainActionBars_RestoreWidgetState("ShapeshiftButton1", ShapeshiftButton1)
+	MainActionBars_RestoreTextureState("SlidingActionBarTexture0", SlidingActionBarTexture0, 1)
+	MainActionBars_RestoreWidgetState("PetActionButton1", PetActionButton1, 1)
+	MainActionBars_RestoreTextureState("ShapeshiftBarLeft", ShapeshiftBarLeft, 1)
+	MainActionBars_RestoreWidgetState("ShapeshiftButton1", ShapeshiftButton1, 1)
 	MainActionBars_RestoreTextureState("MainMenuBarLeftEndCap", MainMenuBarLeftEndCap)
 	MainActionBars_RestoreTextureState("MainMenuBarRightEndCap", MainMenuBarRightEndCap)
 	MainActionBars_RestoreWidgetState("ActionBarUpButton", ActionBarUpButton)
@@ -2693,7 +2760,7 @@ local function MainActionBars_InstallHooks()
 		mainActionBarsOriginalShowPetActionBar = ShowPetActionBar
 		function ShowPetActionBar()
 			mainActionBarsOriginalShowPetActionBar()
-			if MainActionBars_UseAlternativeStyle() then
+			if MainActionBars_UseAlternativeStyle() and not MainActionBars.inPetBarRefresh then
 				MainActionBars.pendingLayoutRefresh = true
 			end
 		end
@@ -2703,7 +2770,7 @@ local function MainActionBars_InstallHooks()
 		mainActionBarsOriginalHidePetActionBar = HidePetActionBar
 		function HidePetActionBar()
 			mainActionBarsOriginalHidePetActionBar()
-			if MainActionBars_UseAlternativeStyle() then
+			if MainActionBars_UseAlternativeStyle() and not MainActionBars.inPetBarRefresh then
 				MainActionBars.pendingLayoutRefresh = true
 			end
 		end
@@ -2748,6 +2815,27 @@ function MainActionBars:Init()
 		elseif MainActionBars.alternativeApplied then
 			MainActionBars_RestoreStockLayout()
 			MainActionBars.alternativeApplied = nil
+		else
+			MainActionBars_RefreshPetActionBar()
+		end
+		MainActionBars_RequestPetActionBarRefresh(MAIN_ACTION_BARS_PET_RETRY_SECONDS)
+	end)
+	Main.RegisterEventHandler("PET_BAR_UPDATE", "action_bars_pet", function()
+		MainActionBars_RequestPetActionBarRefresh(2)
+		if MainActionBars_IsEnabled() then
+			MainActionBars.pendingLayoutRefresh = true
+		end
+	end)
+	Main.RegisterEventHandler("PLAYER_PET_CHANGED", "action_bars_pet_changed", function()
+		MainActionBars_RequestPetActionBarRefresh(MAIN_ACTION_BARS_PET_RETRY_SECONDS)
+		if MainActionBars_IsEnabled() then
+			MainActionBars.pendingLayoutRefresh = true
+		end
+	end)
+	Main.RegisterEventHandler("UPDATE_BONUS_ACTIONBAR", "action_bars_bonus", function()
+		MainActionBars_RequestPetActionBarRefresh(2)
+		if MainActionBars_IsEnabled() then
+			MainActionBars.pendingLayoutRefresh = true
 		end
 	end)
 	if MainActionBarsGryphonButton then
@@ -2766,7 +2854,10 @@ function MainActionBars:Disable()
 	if MainActionBars.alternativeApplied then
 		MainActionBars_RestoreStockLayout()
 		MainActionBars.alternativeApplied = nil
+	else
+		MainActionBars_RefreshPetActionBar()
 	end
+	MainActionBars_RequestPetActionBarRefresh(MAIN_ACTION_BARS_PET_RETRY_SECONDS)
 end
 
 function MainActionBars:ApplyConfig()
@@ -2785,9 +2876,32 @@ function MainActionBars:OnUILayoutChanged()
 end
 
 function MainActionBars:ProcessDeferredRefresh()
+	local now
+	local hasPetBar
+
 	if MainActionBars.pendingLayoutRefresh then
 		MainActionBars.pendingLayoutRefresh = nil
 		MainActionBars_RefreshLayout()
+	end
+
+	if MainActionBars.pendingPetBarRefresh then
+		if not GetTime then
+			MainActionBars.pendingPetBarRefresh = nil
+			MainActionBars_RefreshPetActionBar()
+			return
+		end
+
+		now = GetTime()
+		if not MainActionBars.nextPetBarRefresh or now >= MainActionBars.nextPetBarRefresh then
+			hasPetBar = MainActionBars_RefreshPetActionBar()
+			if hasPetBar or (MainActionBars.petBarRefreshUntil and now >= MainActionBars.petBarRefreshUntil) then
+				MainActionBars.pendingPetBarRefresh = nil
+				MainActionBars.nextPetBarRefresh = nil
+				MainActionBars.petBarRefreshUntil = nil
+			else
+				MainActionBars.nextPetBarRefresh = now + MAIN_ACTION_BARS_PET_RETRY_INTERVAL
+			end
+		end
 	end
 end
 
@@ -3053,15 +3167,16 @@ local mainAlwaysTrackBookTypes = {
 }
 
 local mainAlwaysTrackTrackedSpells = {
-	{ label = "Find Herbs", spellName = "Find Herbs", spellId = 2383 },
-	{ label = "Find Minerals", spellName = "Find Minerals", spellId = 2580 },
-	{ label = "Find Treasure", spellName = "Find Treasure", spellId = 2481 },
+	{ label = "Find Herbs", spellName = "Find Herbs", spellId = 2383, textures = { "Interface\\Icons\\Spell_Nature_NatureTouchGrow" } },
+	{ label = "Find Minerals", spellName = "Find Minerals", spellId = 2580, textures = { "Interface\\Icons\\Spell_Nature_Earthquake" } },
+	{ label = "Find Treasure", spellName = "Find Treasure", spellId = 2481, textures = { "Interface\\Icons\\Racial_Dwarf_FindTreasure" } },
 }
 
 local mainAlwaysTrackKnownSpells = {}
 local mainAlwaysTrackHasKnownSpell = nil
 local mainAlwaysTrackRetryAt = nil
 local MAIN_ALWAYS_TRACK_RETRY_BUFFER_SECONDS = 0.2
+local MAIN_ALWAYS_TRACK_BUFF_FILTER = "HELPFUL|PASSIVE"
 
 local function MainAlwaysTrack_IsPlayerDead()
 	if UnitIsDead and UnitIsDead("player") then
@@ -3133,6 +3248,7 @@ local function MainAlwaysTrack_RefreshKnownSpells()
 				slot = slot,
 				bookType = bookType,
 				texture = texture,
+				textures = spellInfo.textures,
 			})
 			hasKnownSpell = 1
 		end
@@ -3157,7 +3273,7 @@ local function MainAlwaysTrack_GetActiveBuffTextures()
 	end
 
 	for buffIndex = 0, 15 do
-		activeBuffIndex = GetPlayerBuff(buffIndex, "HELPFUL")
+		activeBuffIndex = GetPlayerBuff(buffIndex, MAIN_ALWAYS_TRACK_BUFF_FILTER)
 		if activeBuffIndex and activeBuffIndex >= 0 then
 			buffTexture = GetPlayerBuffTexture(activeBuffIndex)
 			if buffTexture then
@@ -3167,6 +3283,30 @@ local function MainAlwaysTrack_GetActiveBuffTextures()
 	end
 
 	return activeTextures
+end
+
+local function MainAlwaysTrack_IsSpellTextureActive(knownSpell, activeBuffTextures)
+	local textureIndex
+	local texture
+
+	if not knownSpell or not activeBuffTextures then
+		return nil
+	end
+
+	if knownSpell.texture and activeBuffTextures[knownSpell.texture] then
+		return 1
+	end
+
+	if knownSpell.textures then
+		for textureIndex = 1, Main_ArrayCount(knownSpell.textures) do
+			texture = knownSpell.textures[textureIndex]
+			if texture and activeBuffTextures[texture] then
+				return 1
+			end
+		end
+	end
+
+	return nil
 end
 
 local function MainAlwaysTrack_GetMissingKnownSpells()
@@ -3181,7 +3321,7 @@ local function MainAlwaysTrack_GetMissingKnownSpells()
 	for spellIndex = 1, Main_ArrayCount(mainAlwaysTrackKnownSpells) do
 		knownSpell = mainAlwaysTrackKnownSpells[spellIndex]
 		if knownSpell and knownSpell.slot and knownSpell.bookType then
-			if not knownSpell.texture or not activeBuffTextures[knownSpell.texture] then
+			if not MainAlwaysTrack_IsSpellTextureActive(knownSpell, activeBuffTextures) then
 				Main_ArrayInsert(missingSpells, knownSpell)
 			end
 		end
@@ -3348,7 +3488,7 @@ local MAIN_MERGED_BAGS_ITEM_SIZE = 37
 local MAIN_MERGED_BAGS_ITEM_SPACING = 3
 local MAIN_MERGED_BAGS_SIDE_PADDING = 10
 local MAIN_MERGED_BAGS_TOP_PADDING = 30
-local MAIN_MERGED_BAGS_BOTTOM_PADDING = 12
+local MAIN_MERGED_BAGS_BOTTOM_PADDING = 30
 local MAIN_MERGED_BAGS_MIN_WIDTH = 190
 local MAIN_MERGED_BAGS_MIN_HEIGHT = 82
 local MAIN_MERGED_BAGS_MAX_BAG_SLOTS = MAX_CONTAINER_ITEMS or 20
@@ -3438,6 +3578,21 @@ local function MainMergedBags_UpdateBagButtonChecks(isShown)
 			end
 		end
 	end
+end
+
+local function MainMergedBags_UpdateMoneyFrame()
+	local moneyFrame
+	local previousThis
+
+	moneyFrame = getglobal(MAIN_MERGED_BAGS_FRAME_NAME .. "MoneyFrame")
+	if not moneyFrame or not MoneyFrame_UpdateMoney then
+		return
+	end
+
+	previousThis = this
+	this = moneyFrame
+	MoneyFrame_UpdateMoney()
+	this = previousThis
 end
 
 local function MainMergedBags_UpdateItem(button)
@@ -3588,6 +3743,7 @@ local function MainMergedBags_Generate()
 
 	mainMergedBagsVisibleCount = visibleIndex
 	MainMergedBags_UpdateLayout()
+	MainMergedBags_UpdateMoneyFrame()
 end
 
 local function MainMergedBags_Open(automatic)
@@ -3808,6 +3964,7 @@ end
 
 function MainMergedBagsFrame_OnShow()
 	MainMergedBags_UpdateBagButtonChecks(1)
+	MainMergedBags_UpdateMoneyFrame()
 	if PlaySound then
 		PlaySound("igBackPackOpen")
 	end

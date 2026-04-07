@@ -11,7 +11,7 @@ local MAIN_MERGED_BAGS_ITEM_SIZE = 37
 local MAIN_MERGED_BAGS_ITEM_SPACING = 3
 local MAIN_MERGED_BAGS_SIDE_PADDING = 10
 local MAIN_MERGED_BAGS_TOP_PADDING = 30
-local MAIN_MERGED_BAGS_BOTTOM_PADDING = 12
+local MAIN_MERGED_BAGS_BOTTOM_PADDING = 30
 local MAIN_MERGED_BAGS_MIN_WIDTH = 190
 local MAIN_MERGED_BAGS_MIN_HEIGHT = 82
 local MAIN_MERGED_BAGS_MAX_BAG_SLOTS = MAX_CONTAINER_ITEMS or 20
@@ -101,6 +101,21 @@ local function MainMergedBags_UpdateBagButtonChecks(isShown)
 			end
 		end
 	end
+end
+
+local function MainMergedBags_UpdateMoneyFrame()
+	local moneyFrame
+	local previousThis
+
+	moneyFrame = getglobal(MAIN_MERGED_BAGS_FRAME_NAME .. "MoneyFrame")
+	if not moneyFrame or not MoneyFrame_UpdateMoney then
+		return
+	end
+
+	previousThis = this
+	this = moneyFrame
+	MoneyFrame_UpdateMoney()
+	this = previousThis
 end
 
 local function MainMergedBags_UpdateItem(button)
@@ -251,6 +266,7 @@ local function MainMergedBags_Generate()
 
 	mainMergedBagsVisibleCount = visibleIndex
 	MainMergedBags_UpdateLayout()
+	MainMergedBags_UpdateMoneyFrame()
 end
 
 local function MainMergedBags_Open(automatic)
@@ -471,6 +487,7 @@ end
 
 function MainMergedBagsFrame_OnShow()
 	MainMergedBags_UpdateBagButtonChecks(1)
+	MainMergedBags_UpdateMoneyFrame()
 	if PlaySound then
 		PlaySound("igBackPackOpen")
 	end
