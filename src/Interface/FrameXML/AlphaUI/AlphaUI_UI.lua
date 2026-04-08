@@ -18,8 +18,29 @@ local function Main_RegisterManagerPanel()
 	Main_ArrayInsert(UISpecialFrames, "MainManagerFrame")
 end
 
+local mainOriginalReloadUI = nil
+local mainReloadUIWrapped = nil
+
+local function Main_WrapReloadUI()
+	if mainReloadUIWrapped or not ReloadUI then
+		return
+	end
+
+	mainOriginalReloadUI = ReloadUI
+	ReloadUI = function()
+		if Main and Main.API and Main.API.NotifyReloadUI then
+			Main.API:NotifyReloadUI()
+		end
+
+		return mainOriginalReloadUI()
+	end
+
+	mainReloadUIWrapped = 1
+end
+
 function Main_OnLoad()
 	Main_RegisterManagerPanel()
+	Main_WrapReloadUI()
 	this:RegisterEvent("PLAYER_ENTERING_WORLD")
 	this:RegisterEvent("CHAT_MSG_CHANNEL")
 end

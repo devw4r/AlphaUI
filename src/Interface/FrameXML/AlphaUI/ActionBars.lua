@@ -1,6 +1,7 @@
 local MainActionBars = {
 	name = "Action Bars",
 	description = "Applies the custom stock-bar layout and bag/microbutton tweaks.",
+	reloadRequired = 1,
 	options = {
 		{
 			type = "number",
@@ -23,8 +24,6 @@ local mainActionBarsOriginalShapeshiftBarUpdate = nil
 local mainActionBarsOriginalMainMenuExpBarUpdate = nil
 local mainActionBarsOriginalPaperDollItemSlotButtonUpdateLock = nil
 local mainActionBarsOriginalGameTooltipSetOwner = nil
-local MAIN_ACTION_BARS_PET_RETRY_SECONDS = 8
-local MAIN_ACTION_BARS_PET_RETRY_INTERVAL = 0.25
 local MAIN_ACTION_BARS_MICRO_BUTTONS = {
 	"CharacterMicroButton",
 	"SpellbookMicroButton",
@@ -34,6 +33,10 @@ local MAIN_ACTION_BARS_MICRO_BUTTONS = {
 	"MainMenuMicroButton",
 	"BugsMicroButton",
 }
+local MAIN_ACTION_BARS_PET_RECOVERY_SECONDS = 8
+local MAIN_ACTION_BARS_PET_RECOVERY_INTERVAL = 0.25
+local MAIN_ACTION_BARS_ALT_CHAT_BASE_Y = 94
+local MAIN_ACTION_BARS_ALT_CHAT_EXTRA_Y = 14
 
 local function MainActionBars_IsEnabled()
 	return Main.IsModuleEnabled("action_bars")
@@ -238,67 +241,145 @@ local function MainActionBars_UpdateContainerAnchors()
 	end
 end
 
-local function MainActionBars_RefreshPetActionBar()
-	local hasPetBar
-	local bonusOffset
-
-	if not PetActionBarFrame or not PetHasActionBar then
+local function MainActionBars_ApplyPetActionBarLayout(alternativeLayout)
+	if not PetActionBarFrame or not SlidingActionBarTexture0 or not PetActionButton1 then
 		return
 	end
 
-	MainActionBars.inPetBarRefresh = true
-	if PetActionBar_Update then
-		PetActionBar_Update()
+	SlidingActionBarTexture0:ClearAllPoints()
+	SlidingActionBarTexture0:SetPoint("TOPLEFT", "PetActionBarFrame", "TOPLEFT", 0, 0)
+	PetActionButton1:ClearAllPoints()
+	if alternativeLayout then
+		PetActionButton1:SetPoint("TOP", "PetActionBarFrame", "LEFT", 51, 9)
+	else
+		PetActionButton1:SetPoint("BOTTOMLEFT", "PetActionBarFrame", "BOTTOMLEFT", 36, 1)
+	end
+end
+
+local function MainActionBars_HasActivePet()
+	if UnitExists then
+		return UnitExists("pet") and 1 or nil
 	end
 
-	hasPetBar = PetHasActionBar()
+	if PetHasActionBar then
+		return PetHasActionBar() and 1 or nil
+	end
+
+	return nil
+end
+
+local function MainActionBars_TryRecoverPetActionBar()
+	local bonusOffset
+
+	if not PetActionBarFrame or not PetHasActionBar then
+		return 1
+	end
+
 	if GetBonusBarOffset then
 		bonusOffset = GetBonusBarOffset()
 	end
+	if bonusOffset and bonusOffset > 0 then
+		return 1
+	end
 
-	if hasPetBar and not (bonusOffset and bonusOffset > 0) then
-		if UnlockPetActionBar then
-			UnlockPetActionBar()
+	if not MainActionBars_HasActivePet() then
+		return 1
+	end
+
+	if not PetHasActionBar() then
+		if Main.API and Main.API.RequestPetActionBarRefresh then
+			Main.API:RequestPetActionBarRefresh()
 		end
-		if ShowPetActionBar then
-			ShowPetActionBar()
-		else
-			PetActionBarFrame:Show()
-		end
-		if PetActionBarFrame.IsVisible and not PetActionBarFrame:IsVisible() then
-			PetActionBarFrame:Show()
-		end
-		if LockPetActionBar then
-			LockPetActionBar()
-		end
+		return nil
+	end
+
+	if PetActionBarFrame.IsVisible and PetActionBarFrame:IsVisible() then
+		return 1
+	end
+
+	if UnlockPetActionBar then
+		UnlockPetActionBar()
+	end
+	if ShowPetActionBar then
+		ShowPetActionBar()
 	else
-		if UnlockPetActionBar then
-			UnlockPetActionBar()
-		end
-		if HidePetActionBar then
-			HidePetActionBar()
-		else
-			PetActionBarFrame:Hide()
-		end
+		PetActionBarFrame:Show()
 	end
-	MainActionBars.inPetBarRefresh = nil
-	if hasPetBar and not (bonusOffset and bonusOffset > 0) and PetActionBarFrame.IsVisible then
-		return PetActionBarFrame:IsVisible()
+	if LockPetActionBar then
+		LockPetActionBar()
 	end
-	return hasPetBar
+
+	if PetActionBarFrame.IsVisible then
+		return PetActionBarFrame:IsVisible() and 1 or nil
+	end
+
+	return 1
 end
 
-local function MainActionBars_RequestPetActionBarRefresh(seconds)
+local function MainActionBars_RequestPetActionBarRecovery(seconds)
 	local now
 
-	MainActionBars.pendingPetBarRefresh = true
-	MainActionBars.nextPetBarRefresh = nil
+	MainActionBars.pendingPetActionBarRecovery = 1
+	MainActionBars.nextPetActionBarRecovery = nil
 
 	if GetTime then
 		now = GetTime()
-		MainActionBars.petBarRefreshUntil = now + (seconds or MAIN_ACTION_BARS_PET_RETRY_SECONDS)
+		MainActionBars.petActionBarRecoveryUntil = now + (seconds or MAIN_ACTION_BARS_PET_RECOVERY_SECONDS)
 	else
-		MainActionBars.petBarRefreshUntil = nil
+		MainActionBars.petActionBarRecoveryUntil = nil
+	end
+end
+
+local function MainActionBars_HasVisiblePetBar()
+	if not PetHasActionBar or not PetHasActionBar() then
+		return nil
+	end
+	if not PetActionBarFrame then
+		return 1
+	end
+	if PetActionBarFrame.IsVisible then
+		return PetActionBarFrame:IsVisible() and 1 or nil
+	end
+	return 1
+end
+
+local function MainActionBars_HasVisibleShapeshiftBar()
+	if not ShapeshiftBarFrame then
+		return nil
+	end
+	if GetNumShapeshiftForms and GetNumShapeshiftForms() <= 0 then
+		return nil
+	end
+	if ShapeshiftBarFrame.IsVisible then
+		return ShapeshiftBarFrame:IsVisible() and 1 or nil
+	end
+	return 1
+end
+
+local function MainActionBars_GetAlternativeChatBottomY()
+	local chatBottomY
+
+	chatBottomY = MAIN_ACTION_BARS_ALT_CHAT_BASE_Y
+	if MainActionBars_HasVisiblePetBar() or MainActionBars_HasVisibleShapeshiftBar() then
+		chatBottomY = chatBottomY + MAIN_ACTION_BARS_ALT_CHAT_EXTRA_Y
+	end
+
+	return chatBottomY
+end
+
+local function MainActionBars_ApplyAlternativeChatLayout()
+	local chatBottomY
+
+	chatBottomY = MainActionBars_GetAlternativeChatBottomY()
+
+	ChatFrame:ClearAllPoints()
+	ChatFrame:SetPoint("BOTTOMLEFT", "UIParent", "BOTTOMLEFT", 32, chatBottomY)
+	CombatLog:ClearAllPoints()
+	CombatLog:SetPoint("BOTTOMRIGHT", "UIParent", "BOTTOMRIGHT", -32, chatBottomY)
+
+	if MainChatCopyButton and ChatFrameMenuButton then
+		MainChatCopyButton:ClearAllPoints()
+		MainChatCopyButton:SetPoint("BOTTOM", "ChatFrameMenuButton", "TOP", 0, 0)
 	end
 end
 
@@ -566,11 +647,7 @@ local function MainActionBars_ApplyStockLayoutFixes()
 	CombatLog:ClearAllPoints()
 	CombatLog:SetPoint("BOTTOMRIGHT", "UIParent", "BOTTOMRIGHT", -32, 82)
 
-	SlidingActionBarTexture0:ClearAllPoints()
-	SlidingActionBarTexture0:SetPoint("TOPLEFT", "PetActionBarFrame", "TOPLEFT", 0, 0)
-	PetActionButton1:ClearAllPoints()
-	PetActionButton1:SetPoint("BOTTOMLEFT", "PetActionBarFrame", "BOTTOMLEFT", 36, 1)
-	MainActionBars_RefreshPetActionBar()
+	MainActionBars_ApplyPetActionBarLayout(nil)
 	ShapeshiftBarLeft:ClearAllPoints()
 	ShapeshiftBarLeft:SetPoint("BOTTOMLEFT", "ShapeshiftBarFrame", "BOTTOMLEFT", 0, 0)
 	ShapeshiftButton1:ClearAllPoints()
@@ -596,11 +673,7 @@ local function MainActionBars_ApplyAlternativeLayout()
 	ActionButton1:ClearAllPoints()
 	ActionButton1:SetPoint("BOTTOMLEFT", "MainMenuBarArtFrame", "BOTTOMLEFT", 8, 7)
 
-	SlidingActionBarTexture0:ClearAllPoints()
-	SlidingActionBarTexture0:SetPoint("TOPLEFT", "PetActionBarFrame", "TOPLEFT", 0, 0)
-	PetActionButton1:ClearAllPoints()
-	PetActionButton1:SetPoint("TOP", "PetActionBarFrame", "LEFT", 51, 9)
-	MainActionBars_RefreshPetActionBar()
+	MainActionBars_ApplyPetActionBarLayout(1)
 
 	ShapeshiftBarLeft:ClearAllPoints()
 	ShapeshiftBarLeft:SetPoint("BOTTOMLEFT", "ShapeshiftBarFrame", "BOTTOMLEFT", 0, 0)
@@ -640,10 +713,7 @@ local function MainActionBars_ApplyAlternativeLayout()
 
 	MainActionBars_ApplyMicroButtonLayout()
 
-	ChatFrame:ClearAllPoints()
-	ChatFrame:SetPoint("BOTTOMLEFT", "UIParent", "BOTTOMLEFT", 32, 94)
-	CombatLog:ClearAllPoints()
-	CombatLog:SetPoint("BOTTOMRIGHT", "UIParent", "BOTTOMRIGHT", -32, 94)
+	MainActionBars_ApplyAlternativeChatLayout()
 	MainActionBars.alternativeApplied = true
 end
 
@@ -773,7 +843,7 @@ local function MainActionBars_InstallHooks()
 		mainActionBarsOriginalShowPetActionBar = ShowPetActionBar
 		function ShowPetActionBar()
 			mainActionBarsOriginalShowPetActionBar()
-			if MainActionBars_UseAlternativeStyle() and not MainActionBars.inPetBarRefresh then
+			if MainActionBars_UseAlternativeStyle() then
 				MainActionBars.pendingLayoutRefresh = true
 			end
 		end
@@ -783,7 +853,7 @@ local function MainActionBars_InstallHooks()
 		mainActionBarsOriginalHidePetActionBar = HidePetActionBar
 		function HidePetActionBar()
 			mainActionBarsOriginalHidePetActionBar()
-			if MainActionBars_UseAlternativeStyle() and not MainActionBars.inPetBarRefresh then
+			if MainActionBars_UseAlternativeStyle() then
 				MainActionBars.pendingLayoutRefresh = true
 			end
 		end
@@ -828,28 +898,23 @@ function MainActionBars:Init()
 		elseif MainActionBars.alternativeApplied then
 			MainActionBars_RestoreStockLayout()
 			MainActionBars.alternativeApplied = nil
-		else
-			MainActionBars_RefreshPetActionBar()
 		end
-		MainActionBars_RequestPetActionBarRefresh(MAIN_ACTION_BARS_PET_RETRY_SECONDS)
-	end)
-	Main.RegisterEventHandler("PET_BAR_UPDATE", "action_bars_pet", function()
-		MainActionBars_RequestPetActionBarRefresh(2)
-		if MainActionBars_IsEnabled() then
-			MainActionBars.pendingLayoutRefresh = true
-		end
+		MainActionBars_RequestPetActionBarRecovery(MAIN_ACTION_BARS_PET_RECOVERY_SECONDS)
 	end)
 	Main.RegisterEventHandler("PLAYER_PET_CHANGED", "action_bars_pet_changed", function()
-		MainActionBars_RequestPetActionBarRefresh(MAIN_ACTION_BARS_PET_RETRY_SECONDS)
+		MainActionBars_RequestPetActionBarRecovery(MAIN_ACTION_BARS_PET_RECOVERY_SECONDS)
+	end)
+	Main.RegisterEventHandler("PET_BAR_UPDATE", "action_bars_pet", function()
 		if MainActionBars_IsEnabled() then
 			MainActionBars.pendingLayoutRefresh = true
 		end
+		MainActionBars_RequestPetActionBarRecovery(2)
 	end)
 	Main.RegisterEventHandler("UPDATE_BONUS_ACTIONBAR", "action_bars_bonus", function()
-		MainActionBars_RequestPetActionBarRefresh(2)
 		if MainActionBars_IsEnabled() then
 			MainActionBars.pendingLayoutRefresh = true
 		end
+		MainActionBars_RequestPetActionBarRecovery(2)
 	end)
 	if MainActionBarsGryphonButton then
 		MainActionBarsGryphonButton:Hide()
@@ -861,16 +926,16 @@ function MainActionBars:Enable()
 	if UpdateMicroButtons then
 		UpdateMicroButtons()
 	end
+	MainActionBars_RequestPetActionBarRecovery(MAIN_ACTION_BARS_PET_RECOVERY_SECONDS)
 end
 
 function MainActionBars:Disable()
+	MainActionBars.pendingLayoutRefresh = nil
 	if MainActionBars.alternativeApplied then
 		MainActionBars_RestoreStockLayout()
 		MainActionBars.alternativeApplied = nil
-	else
-		MainActionBars_RefreshPetActionBar()
 	end
-	MainActionBars_RequestPetActionBarRefresh(MAIN_ACTION_BARS_PET_RETRY_SECONDS)
+	MainActionBars_RequestPetActionBarRecovery(MAIN_ACTION_BARS_PET_RECOVERY_SECONDS)
 end
 
 function MainActionBars:ApplyConfig()
@@ -878,6 +943,7 @@ function MainActionBars:ApplyConfig()
 	if UpdateMicroButtons then
 		UpdateMicroButtons()
 	end
+	MainActionBars_RequestPetActionBarRecovery(MAIN_ACTION_BARS_PET_RECOVERY_SECONDS)
 end
 
 function MainActionBars:OnUILayoutChanged()
@@ -890,29 +956,31 @@ end
 
 function MainActionBars:ProcessDeferredRefresh()
 	local now
-	local hasPetBar
+	local recovered
 
 	if MainActionBars.pendingLayoutRefresh then
 		MainActionBars.pendingLayoutRefresh = nil
 		MainActionBars_RefreshLayout()
 	end
 
-	if MainActionBars.pendingPetBarRefresh then
+	if MainActionBars.pendingPetActionBarRecovery then
 		if not GetTime then
-			MainActionBars.pendingPetBarRefresh = nil
-			MainActionBars_RefreshPetActionBar()
+			MainActionBars.pendingPetActionBarRecovery = nil
+			MainActionBars.nextPetActionBarRecovery = nil
+			MainActionBars.petActionBarRecoveryUntil = nil
+			MainActionBars_TryRecoverPetActionBar()
 			return
 		end
 
 		now = GetTime()
-		if not MainActionBars.nextPetBarRefresh or now >= MainActionBars.nextPetBarRefresh then
-			hasPetBar = MainActionBars_RefreshPetActionBar()
-			if hasPetBar or (MainActionBars.petBarRefreshUntil and now >= MainActionBars.petBarRefreshUntil) then
-				MainActionBars.pendingPetBarRefresh = nil
-				MainActionBars.nextPetBarRefresh = nil
-				MainActionBars.petBarRefreshUntil = nil
+		if not MainActionBars.nextPetActionBarRecovery or now >= MainActionBars.nextPetActionBarRecovery then
+			recovered = MainActionBars_TryRecoverPetActionBar()
+			if recovered or (MainActionBars.petActionBarRecoveryUntil and now >= MainActionBars.petActionBarRecoveryUntil) then
+				MainActionBars.pendingPetActionBarRecovery = nil
+				MainActionBars.nextPetActionBarRecovery = nil
+				MainActionBars.petActionBarRecoveryUntil = nil
 			else
-				MainActionBars.nextPetBarRefresh = now + MAIN_ACTION_BARS_PET_RETRY_INTERVAL
+				MainActionBars.nextPetActionBarRecovery = now + MAIN_ACTION_BARS_PET_RECOVERY_INTERVAL
 			end
 		end
 	end

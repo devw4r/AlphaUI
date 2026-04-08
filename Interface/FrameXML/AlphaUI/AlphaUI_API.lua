@@ -19,6 +19,10 @@ Main.API = {
 		requestRetrySeconds = 1,
 		states = {},
 	},
+	petActionBar = {
+		requestRetrySeconds = 1,
+		maxRetries = 5,
+	},
 }
 
 local function Main_APICreateDefaultVersionMap()
@@ -27,6 +31,7 @@ local function Main_APICreateDefaultVersionMap()
 		distance = 0,
 		config = 0,
 		guild = 0,
+		pet = 0,
 	}
 end
 
@@ -191,6 +196,10 @@ function Main.API:HandleGuildUnsupported()
 		self.warnedGuildUnsupported = 1
 		Main_Print("Server guild roster API is unavailable.")
 	end
+end
+
+function Main.API:HandlePetUnsupported()
+	self.petUnsupported = 1
 end
 
 function Main.API:HandleApiVersionMessage(message)
@@ -670,6 +679,8 @@ function Main.API:HandleErrorMessage(message)
 	local targetDistanceFailed
 	local auraRequestFailed
 	local guildRequestFailed
+	local petRequestFailed
+	local petState
 
 	_, _, errorCode, unitId, requestToken = string.find(message, "^(-?%d+),%s*([^,]+),?%s*(.*)$")
 	if not errorCode then
@@ -729,6 +740,13 @@ function Main.API:HandleErrorMessage(message)
 		self.guildRoster.requestToken = nil
 	end
 
+	petState = self.petActionBar
+	petRequestFailed = petState and petState.requestPending and requestToken == petState.requestToken and unitId == "pet"
+	if petRequestFailed then
+		petState.requestPending = nil
+		petState.requestToken = nil
+	end
+
 	if errorCode == "-1" and targetDistanceFailed then
 		self:HandleDistanceUnsupported()
 	end
@@ -744,6 +762,10 @@ function Main.API:HandleErrorMessage(message)
 
 	if errorCode == "-1" and guildRequestFailed then
 		self:HandleGuildUnsupported()
+	end
+
+	if errorCode == "-1" and petRequestFailed then
+		self:HandlePetUnsupported()
 	end
 end
 
@@ -786,6 +808,99 @@ function Main.API:RequestGuildRoster(force)
 
 	token = self:CreateRequestToken()
 	if self:SendCommand("get_guild_roster", token) then
+		state.requestPending = 1
+		state.requestToken = token
+		state.lastRequestAt = now
+		return 1
+	end
+
+	return nil
+end
+
+function Main.API:NotifyReloadUI()
+	if self.petUnsupported or not self.handshake or not self.handshake.completed then
+		return nil
+	end
+	if not self:IsServerApiSupported("pet") then
+		return nil
+	end
+
+	return self:SendCommand("notify_reloadui")
+end
+
+function Main.API:ResetPetActionBarRequestState(resetRetries)
+	local state
+
+	state = self.petActionBar
+	if not state then
+		return
+	end
+
+	state.requestPending = nil
+	state.requestToken = nil
+	state.lastRequestAt = nil
+
+	if resetRetries then
+		state.initialRequestSent = nil
+		state.retryAttempts = 0
+		state.retryExhausted = nil
+	end
+end
+
+function Main.API:RequestPetActionBarRefresh(force)
+	local state
+	local now
+	local token
+
+	if self.petUnsupported then
+		return nil
+	end
+	if not self.handshake or not self.handshake.completed then
+		return nil
+	end
+	if not self:IsServerApiSupported("pet") then
+		return nil
+	end
+
+	state = self.petActionBar
+	if force then
+		self:ResetPetActionBarRequestState(1)
+	end
+
+	if UnitExists and not UnitExists("pet") then
+		self:ResetPetActionBarRequestState(1)
+		return nil
+	end
+	if PetHasActionBar and PetHasActionBar() then
+		self:ResetPetActionBarRequestState(1)
+		return nil
+	end
+
+	now = GetTime and GetTime() or 0
+
+	if state.retryExhausted and not force then
+		return nil
+	end
+	if state.requestPending and not force then
+		return nil
+	end
+	if not force and state.lastRequestAt and (now - state.lastRequestAt) < (state.requestRetrySeconds or 1) then
+		return nil
+	end
+	if not force and state.initialRequestSent and
+		(state.retryAttempts or 0) >= (state.maxRetries or 5) then
+		state.retryExhausted = 1
+		return nil
+	end
+
+	token = self:CreateRequestToken()
+	if self:SendCommand("get_pet_bar", token) then
+		if state.initialRequestSent then
+			state.retryAttempts = (state.retryAttempts or 0) + 1
+		else
+			state.initialRequestSent = 1
+			state.retryAttempts = 0
+		end
 		state.requestPending = 1
 		state.requestToken = token
 		state.lastRequestAt = now
@@ -903,6 +1018,7 @@ function Main.API:OnUpdate()
 	local unitId
 	local auraState
 	local hs
+	local petState
 
 	if not self.startedAt then
 		return
@@ -968,5 +1084,17 @@ function Main.API:OnUpdate()
 		(now - self.guildRoster.lastRequestAt) >= 5 then
 		self.guildRoster.requestPending = nil
 		self.guildRoster.requestToken = nil
+	end
+
+	-- Pet action bar request timeout.
+	petState = self.petActionBar
+	if petState then
+		if (UnitExists and not UnitExists("pet")) or (PetHasActionBar and PetHasActionBar()) then
+			self:ResetPetActionBarRequestState(1)
+		elseif petState.requestPending and petState.lastRequestAt and
+			(now - petState.lastRequestAt) >= (petState.requestRetrySeconds or 1) then
+			petState.requestPending = nil
+			petState.requestToken = nil
+		end
 	end
 end
