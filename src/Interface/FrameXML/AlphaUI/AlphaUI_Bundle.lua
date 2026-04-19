@@ -1596,6 +1596,25 @@ local function MainUnitFrames_SetStatusBarTextState(bar, visible)
 	end
 end
 
+local function MainUnitFrames_ClearStatusBarTextPrefix(bar)
+	if bar and SetTextStatusBarTextPrefix then
+		SetTextStatusBarTextPrefix(bar)
+	end
+end
+
+local function MainUnitFrames_ApplySimpleStatusTextPrefixes()
+	if not MainUnitFrames_IsEnabled() then
+		return
+	end
+
+	MainUnitFrames_ClearStatusBarTextPrefix(PlayerFrameHealthBar)
+	MainUnitFrames_ClearStatusBarTextPrefix(PlayerFrameManaBar)
+	MainUnitFrames_ClearStatusBarTextPrefix(TargetFrameHealthBar)
+	MainUnitFrames_ClearStatusBarTextPrefix(TargetFrameManaBar)
+	MainUnitFrames_ClearStatusBarTextPrefix(PetFrameHealthBar)
+	MainUnitFrames_ClearStatusBarTextPrefix(PetFrameManaBar)
+end
+
 local function MainUnitFrames_ApplyAlternativeStyle()
 	if not PlayerFrameTexture or not TargetFrameTexture then
 		return
@@ -1832,6 +1851,7 @@ local function MainUnitFrames_RefreshStatusBars()
 
 	statusTextValue = MainUnitFrames_ShouldShowStatusText() and 1 or 0
 	SetCVar("statusBarText", statusTextValue)
+	MainUnitFrames_ApplySimpleStatusTextPrefixes()
 
 	if OptionsFrameCheckButtons and OptionsFrameCheckButtons["STATUS_BAR_TEXT"] then
 		OptionsFrameCheckButtons["STATUS_BAR_TEXT"].value = statusTextValue
@@ -1927,6 +1947,9 @@ local function MainUnitFrames_RestoreStockFrames()
 	end
 
 	if PlayerFrameHealthBar then
+		if SetTextStatusBarTextPrefix then
+			SetTextStatusBarTextPrefix(PlayerFrameHealthBar, HEALTH or "Health")
+		end
 		UnitFrameHealthBar_Update(PlayerFrameHealthBar, "player")
 	end
 	if PlayerFrameManaBar then
@@ -2032,6 +2055,7 @@ function MainUnitFrames:ProcessDeferredRefresh()
 		MainUnitFrames.pendingStyleRefresh = nil
 		if MainUnitFrames_UseAlternativeStyle() then
 			MainUnitFrames_ApplyStyle()
+			MainUnitFrames_RefreshStatusBars()
 		end
 	end
 end
