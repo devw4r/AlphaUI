@@ -523,6 +523,43 @@ local function MainUnitFrames_RefreshUnitManaText(frame)
 	end
 end
 
+function MainTargetStatusTextFrame_OnLoad()
+	local info
+	local powerType
+
+	MainUnitFrames_GetOriginalStatusTextValue()
+
+	if TargetFrame then
+		TargetFrame.unit = TargetFrame.unit or "target"
+		TargetFrame.healthbar = TargetFrame.healthbar or TargetFrameHealthBar
+		TargetFrame.manabar = TargetFrame.manabar or TargetFrameManaBar
+	end
+	if TargetFrameHealthBar then
+		TargetFrameHealthBar.unit = TargetFrameHealthBar.unit or "target"
+		TargetFrameHealthBar.TextString = TargetFrameHealthBarText
+	end
+	if TargetFrameManaBar then
+		TargetFrameManaBar.unit = TargetFrameManaBar.unit or "target"
+		TargetFrameManaBar.TextString = TargetFrameManaBarText
+	end
+
+	if TargetFrameHealthBar and UnitFrameHealthBar_Update then
+		UnitFrameHealthBar_Update(TargetFrameHealthBar, "target")
+	end
+	if TargetFrameManaBar and UnitFrameManaBar_Update then
+		UnitFrameManaBar_Update(TargetFrameManaBar, "target")
+		powerType = UnitPowerType and UnitPowerType("target") or nil
+		info = ManaBarColor and ManaBarColor[powerType] or nil
+		if info then
+			TargetFrameManaBar:SetStatusBarColor(info.r, info.g, info.b)
+			SetTextStatusBarTextPrefix(TargetFrameManaBar, info.prefix)
+		end
+	end
+
+	MainUnitFrames_RefreshUnitManaText(TargetFrame)
+	MainUnitFrames_RefreshStatusBars()
+end
+
 local function MainUnitFrames_RestoreStockFrames()
 	local info
 	local powerType

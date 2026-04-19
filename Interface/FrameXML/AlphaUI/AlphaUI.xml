@@ -1838,6 +1838,42 @@
 		</Scripts>
 	</Button>
 
+	<Frame name="MainTargetStatusTextFrame" frameStrata="HIGH" enableMouse="false" movable="false" parent="TargetFrame">
+		<Size>
+			<AbsDimension x="192" y="77"/>
+		</Size>
+		<Anchors>
+			<Anchor point="CENTER"/>
+		</Anchors>
+		<Layers>
+			<Layer level="OVERLAY">
+				<FontString name="TargetFrameHealthBarText" inherits="TextStatusBarText">
+					<Anchors>
+						<Anchor point="CENTER" relativePoint="TOPLEFT">
+							<Offset>
+								<AbsDimension x="62" y="-40"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+				<FontString name="TargetFrameManaBarText" inherits="TextStatusBarText">
+					<Anchors>
+						<Anchor point="CENTER" relativePoint="TOPLEFT">
+							<Offset>
+								<AbsDimension x="62" y="-51"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Scripts>
+			<OnLoad>
+				MainTargetStatusTextFrame_OnLoad()
+			</OnLoad>
+		</Scripts>
+	</Frame>
+
 	<Frame name="MainTargetDistanceFrame" frameStrata="HIGH" toplevel="true" enableMouse="false" movable="false" hidden="true" parent="UIParent">
 		<Size>
 			<AbsDimension x="64" y="12"/>
