@@ -1596,6 +1596,25 @@ local function MainUnitFrames_SetStatusBarTextState(bar, visible)
 	end
 end
 
+local function MainUnitFrames_ClearStatusBarTextPrefix(bar)
+	if bar and SetTextStatusBarTextPrefix then
+		SetTextStatusBarTextPrefix(bar)
+	end
+end
+
+local function MainUnitFrames_ApplySimpleStatusTextPrefixes()
+	if not MainUnitFrames_IsEnabled() then
+		return
+	end
+
+	MainUnitFrames_ClearStatusBarTextPrefix(PlayerFrameHealthBar)
+	MainUnitFrames_ClearStatusBarTextPrefix(PlayerFrameManaBar)
+	MainUnitFrames_ClearStatusBarTextPrefix(TargetFrameHealthBar)
+	MainUnitFrames_ClearStatusBarTextPrefix(TargetFrameManaBar)
+	MainUnitFrames_ClearStatusBarTextPrefix(PetFrameHealthBar)
+	MainUnitFrames_ClearStatusBarTextPrefix(PetFrameManaBar)
+end
+
 local function MainUnitFrames_ApplyAlternativeStyle()
 	if not PlayerFrameTexture or not TargetFrameTexture then
 		return
@@ -1832,6 +1851,7 @@ local function MainUnitFrames_RefreshStatusBars()
 
 	statusTextValue = MainUnitFrames_ShouldShowStatusText() and 1 or 0
 	SetCVar("statusBarText", statusTextValue)
+	MainUnitFrames_ApplySimpleStatusTextPrefixes()
 
 	if OptionsFrameCheckButtons and OptionsFrameCheckButtons["STATUS_BAR_TEXT"] then
 		OptionsFrameCheckButtons["STATUS_BAR_TEXT"].value = statusTextValue
@@ -1867,6 +1887,43 @@ local function MainUnitFrames_RefreshUnitManaText(frame)
 	end
 end
 
+function MainTargetStatusTextFrame_OnLoad()
+	local info
+	local powerType
+
+	MainUnitFrames_GetOriginalStatusTextValue()
+
+	if TargetFrame then
+		TargetFrame.unit = TargetFrame.unit or "target"
+		TargetFrame.healthbar = TargetFrame.healthbar or TargetFrameHealthBar
+		TargetFrame.manabar = TargetFrame.manabar or TargetFrameManaBar
+	end
+	if TargetFrameHealthBar then
+		TargetFrameHealthBar.unit = TargetFrameHealthBar.unit or "target"
+		TargetFrameHealthBar.TextString = TargetFrameHealthBarText
+	end
+	if TargetFrameManaBar then
+		TargetFrameManaBar.unit = TargetFrameManaBar.unit or "target"
+		TargetFrameManaBar.TextString = TargetFrameManaBarText
+	end
+
+	if TargetFrameHealthBar and UnitFrameHealthBar_Update then
+		UnitFrameHealthBar_Update(TargetFrameHealthBar, "target")
+	end
+	if TargetFrameManaBar and UnitFrameManaBar_Update then
+		UnitFrameManaBar_Update(TargetFrameManaBar, "target")
+		powerType = UnitPowerType and UnitPowerType("target") or nil
+		info = ManaBarColor and ManaBarColor[powerType] or nil
+		if info then
+			TargetFrameManaBar:SetStatusBarColor(info.r, info.g, info.b)
+			SetTextStatusBarTextPrefix(TargetFrameManaBar, info.prefix)
+		end
+	end
+
+	MainUnitFrames_RefreshUnitManaText(TargetFrame)
+	MainUnitFrames_RefreshStatusBars()
+end
+
 local function MainUnitFrames_RestoreStockFrames()
 	local info
 	local powerType
@@ -1890,6 +1947,9 @@ local function MainUnitFrames_RestoreStockFrames()
 	end
 
 	if PlayerFrameHealthBar then
+		if SetTextStatusBarTextPrefix then
+			SetTextStatusBarTextPrefix(PlayerFrameHealthBar, HEALTH or "Health")
+		end
 		UnitFrameHealthBar_Update(PlayerFrameHealthBar, "player")
 	end
 	if PlayerFrameManaBar then
@@ -1995,6 +2055,7 @@ function MainUnitFrames:ProcessDeferredRefresh()
 		MainUnitFrames.pendingStyleRefresh = nil
 		if MainUnitFrames_UseAlternativeStyle() then
 			MainUnitFrames_ApplyStyle()
+			MainUnitFrames_RefreshStatusBars()
 		end
 	end
 end
@@ -3256,15 +3317,16 @@ local mainAlwaysTrackBookTypes = {
 }
 
 local mainAlwaysTrackTrackedSpells = {
-	{ label = "Find Herbs", spellName = "Find Herbs", spellId = 2383, textures = { "Interface\\Icons\\Spell_Nature_NatureTouchGrow" } },
-	{ label = "Find Minerals", spellName = "Find Minerals", spellId = 2580, textures = { "Interface\\Icons\\Spell_Nature_Earthquake" } },
-	{ label = "Find Treasure", spellName = "Find Treasure", spellId = 2481, textures = { "Interface\\Icons\\Racial_Dwarf_FindTreasure" } },
+	{ label = "Find Herbs", spellName = "Find Herbs", spellId = 2383, castableWhileMounted = false, textures = { "Interface\\Icons\\Spell_Nature_NatureTouchGrow" } },
+	{ label = "Find Minerals", spellName = "Find Minerals", spellId = 2580, castableWhileMounted = false, textures = { "Interface\\Icons\\Spell_Nature_Earthquake" } },
+	{ label = "Find Treasure", spellName = "Find Treasure", spellId = 2481, castableWhileMounted = false, textures = { "Interface\\Icons\\Racial_Dwarf_FindTreasure" } },
 }
 
 local mainAlwaysTrackKnownSpells = {}
 local mainAlwaysTrackHasKnownSpell = nil
 local mainAlwaysTrackRetryAt = nil
 local MAIN_ALWAYS_TRACK_RETRY_BUFFER_SECONDS = 0.2
+local MAIN_ALWAYS_TRACK_MOUNT_RETRY_SECONDS = 1
 local MAIN_ALWAYS_TRACK_BUFF_FILTER = "HELPFUL|PASSIVE"
 local MAIN_ALWAYS_TRACK_FIND_TREASURE_SPELL_ID = 2481
 local MAIN_ALWAYS_TRACK_CAST_ERROR_WINDOW_SECONDS = 1
@@ -3280,6 +3342,26 @@ local function MainAlwaysTrack_IsPlayerDead()
 
 	if UnitHealth and UnitHealth("player") == 0 then
 		return 1
+	end
+
+	return nil
+end
+
+local function MainAlwaysTrack_IsPlayerMounted()
+	local mounted
+
+	if IsMounted then
+		mounted = IsMounted()
+		if mounted and mounted ~= 0 then
+			return 1
+		end
+	end
+
+	if UnitIsMounted then
+		mounted = UnitIsMounted("player")
+		if mounted and mounted ~= 0 then
+			return 1
+		end
 	end
 
 	return nil
@@ -3344,6 +3426,7 @@ local function MainAlwaysTrack_RefreshKnownSpells()
 				bookType = bookType,
 				texture = texture,
 				textures = spellInfo.textures,
+				castableWhileMounted = spellInfo.castableWhileMounted == true,
 			})
 			hasKnownSpell = 1
 		end
@@ -3519,6 +3602,7 @@ MainAlwaysTrack_EnsureTracking = function()
 	local readyAt
 	local nextReadyAt
 	local spellToCast
+	local isMounted
 
 	if not MainAlwaysTrack_ShouldMaintainTracking() then
 		return
@@ -3531,12 +3615,15 @@ MainAlwaysTrack_EnsureTracking = function()
 	end
 
 	now = GetTime and GetTime() or 0
+	isMounted = MainAlwaysTrack_IsPlayerMounted()
 
 	for spellIndex = 1, Main_ArrayCount(missingSpells) do
 		knownSpell = missingSpells[spellIndex]
 		readyAt = MainAlwaysTrack_GetReadyAt(knownSpell)
 		if not readyAt or readyAt <= now then
-			if knownSpell.spellId ~= MAIN_ALWAYS_TRACK_FIND_TREASURE_SPELL_ID or not mainAlwaysTrackFindTreasureNeedsStand then
+			if isMounted and not knownSpell.castableWhileMounted then
+				readyAt = now + MAIN_ALWAYS_TRACK_MOUNT_RETRY_SECONDS
+			elseif knownSpell.spellId ~= MAIN_ALWAYS_TRACK_FIND_TREASURE_SPELL_ID or not mainAlwaysTrackFindTreasureNeedsStand then
 				spellToCast = knownSpell
 				break
 			end
