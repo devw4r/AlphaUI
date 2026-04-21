@@ -3317,22 +3317,25 @@ local mainAlwaysTrackBookTypes = {
 }
 
 local mainAlwaysTrackTrackedSpells = {
-	{ label = "Find Herbs", spellName = "Find Herbs", spellId = 2383, castableWhileMounted = false, textures = { "Interface\\Icons\\Spell_Nature_NatureTouchGrow" } },
-	{ label = "Find Minerals", spellName = "Find Minerals", spellId = 2580, castableWhileMounted = false, textures = { "Interface\\Icons\\Spell_Nature_Earthquake" } },
-	{ label = "Find Treasure", spellName = "Find Treasure", spellId = 2481, castableWhileMounted = false, textures = { "Interface\\Icons\\Racial_Dwarf_FindTreasure" } },
+	{ label = "Find Herbs", spellName = "Find Herbs", spellId = 2383, textures = { "Interface\\Icons\\Spell_Nature_NatureTouchGrow" } },
+	{ label = "Find Minerals", spellName = "Find Minerals", spellId = 2580, textures = { "Interface\\Icons\\Spell_Nature_Earthquake" } },
+	{ label = "Find Treasure", spellName = "Find Treasure", spellId = 2481, textures = { "Interface\\Icons\\Racial_Dwarf_FindTreasure" } },
 }
 
 local mainAlwaysTrackKnownSpells = {}
 local mainAlwaysTrackHasKnownSpell = nil
 local mainAlwaysTrackRetryAt = nil
 local MAIN_ALWAYS_TRACK_RETRY_BUFFER_SECONDS = 0.2
-local MAIN_ALWAYS_TRACK_MOUNT_RETRY_SECONDS = 1
+local MAIN_ALWAYS_TRACK_MOUNT_STATE_WAIT_SECONDS = 0.5
+local MAIN_ALWAYS_TRACK_UNMOUNT_SETTLE_SECONDS = 2
 local MAIN_ALWAYS_TRACK_BUFF_FILTER = "HELPFUL|PASSIVE"
 local MAIN_ALWAYS_TRACK_FIND_TREASURE_SPELL_ID = 2481
 local MAIN_ALWAYS_TRACK_CAST_ERROR_WINDOW_SECONDS = 1
 local mainAlwaysTrackLastCastSpellId = nil
 local mainAlwaysTrackLastCastAt = nil
 local mainAlwaysTrackFindTreasureNeedsStand = nil
+local mainAlwaysTrackSuppressedByMountError = nil
+local mainAlwaysTrackUnmountSettleUntil = nil
 local MainAlwaysTrack_EnsureTracking
 
 local function MainAlwaysTrack_IsPlayerDead()
@@ -3348,23 +3351,11 @@ local function MainAlwaysTrack_IsPlayerDead()
 end
 
 local function MainAlwaysTrack_IsPlayerMounted()
-	local mounted
+	return Main.API and Main.API.IsPlayerMounted and Main.API:IsPlayerMounted()
+end
 
-	if IsMounted then
-		mounted = IsMounted()
-		if mounted and mounted ~= 0 then
-			return 1
-		end
-	end
-
-	if UnitIsMounted then
-		mounted = UnitIsMounted("player")
-		if mounted and mounted ~= 0 then
-			return 1
-		end
-	end
-
-	return nil
+local function MainAlwaysTrack_IsMountStatePending()
+	return Main.API and Main.API.IsMountStatePending and Main.API:IsMountStatePending()
 end
 
 local function MainAlwaysTrack_FindSpellByName(spellName)
@@ -3426,7 +3417,6 @@ local function MainAlwaysTrack_RefreshKnownSpells()
 				bookType = bookType,
 				texture = texture,
 				textures = spellInfo.textures,
-				castableWhileMounted = spellInfo.castableWhileMounted == true,
 			})
 			hasKnownSpell = 1
 		end
@@ -3509,6 +3499,8 @@ local function MainAlwaysTrack_GetMissingKnownSpells()
 end
 
 local function MainAlwaysTrack_ShouldMaintainTracking()
+	local now
+
 	if not Main.IsModuleEnabled("always_track") then
 		mainAlwaysTrackRetryAt = nil
 		return nil
@@ -3521,6 +3513,25 @@ local function MainAlwaysTrack_ShouldMaintainTracking()
 
 	if not mainAlwaysTrackHasKnownSpell then
 		mainAlwaysTrackRetryAt = nil
+		return nil
+	end
+
+	if MainAlwaysTrack_IsPlayerMounted() then
+		mainAlwaysTrackRetryAt = nil
+		return nil
+	end
+
+	if mainAlwaysTrackUnmountSettleUntil then
+		now = GetTime and GetTime() or 0
+		if now < mainAlwaysTrackUnmountSettleUntil then
+			mainAlwaysTrackRetryAt = mainAlwaysTrackUnmountSettleUntil
+			return nil
+		end
+		mainAlwaysTrackUnmountSettleUntil = nil
+	end
+
+	if MainAlwaysTrack_IsMountStatePending() then
+		mainAlwaysTrackRetryAt = (GetTime and GetTime() or 0) + MAIN_ALWAYS_TRACK_MOUNT_STATE_WAIT_SECONDS
 		return nil
 	end
 
@@ -3559,7 +3570,36 @@ local function MainAlwaysTrack_IsNotStandingError(message)
 		return nil
 	end
 
-	if SPELL_FAILED_NOTSTANDING and message == SPELL_FAILED_NOTSTANDING then
+	if SPELL_FAILED_NOTSTANDING
+		and (message == SPELL_FAILED_NOTSTANDING or Main_StringFind(message, SPELL_FAILED_NOTSTANDING, 1, 1)) then
+		return 1
+	end
+
+	return nil
+end
+
+local function MainAlwaysTrack_IsMountedError(message)
+	if not message or message == "" then
+		return nil
+	end
+
+	if SPELL_FAILED_NO_MOUNTS_ALLOWED
+		and (message == SPELL_FAILED_NO_MOUNTS_ALLOWED or Main_StringFind(message, SPELL_FAILED_NO_MOUNTS_ALLOWED, 1, 1)) then
+		return 1
+	end
+
+	return nil
+end
+
+local function MainAlwaysTrack_IsRecentTrackedCast()
+	local now
+
+	if not mainAlwaysTrackLastCastSpellId or not mainAlwaysTrackLastCastAt then
+		return nil
+	end
+
+	now = GetTime and GetTime() or 0
+	if (now - mainAlwaysTrackLastCastAt) <= MAIN_ALWAYS_TRACK_CAST_ERROR_WINDOW_SECONDS then
 		return 1
 	end
 
@@ -3568,18 +3608,19 @@ end
 
 local function MainAlwaysTrack_OnErrorMessage()
 	local message
-	local now
 
 	message = arg1
-	if not MainAlwaysTrack_IsNotStandingError(message) then
-		return
+	if not MainAlwaysTrack_IsRecentTrackedCast() then
+		return nil
 	end
-	if mainAlwaysTrackLastCastSpellId ~= MAIN_ALWAYS_TRACK_FIND_TREASURE_SPELL_ID then
+
+	if MainAlwaysTrack_IsMountedError(message) then
+		mainAlwaysTrackSuppressedByMountError = 1
+		mainAlwaysTrackRetryAt = nil
 		return
 	end
 
-	now = GetTime and GetTime() or 0
-	if mainAlwaysTrackLastCastAt and (now - mainAlwaysTrackLastCastAt) <= MAIN_ALWAYS_TRACK_CAST_ERROR_WINDOW_SECONDS then
+	if MainAlwaysTrack_IsNotStandingError(message) and mainAlwaysTrackLastCastSpellId == MAIN_ALWAYS_TRACK_FIND_TREASURE_SPELL_ID then
 		mainAlwaysTrackFindTreasureNeedsStand = 1
 		mainAlwaysTrackRetryAt = nil
 	end
@@ -3594,6 +3635,21 @@ local function MainAlwaysTrack_OnPlayerStand()
 	MainAlwaysTrack_EnsureTracking()
 end
 
+local function MainAlwaysTrack_OnMountStateChanged(mounted)
+	local now
+
+	if mounted then
+		mainAlwaysTrackUnmountSettleUntil = nil
+		mainAlwaysTrackRetryAt = nil
+		return
+	end
+
+	now = GetTime and GetTime() or 0
+	mainAlwaysTrackUnmountSettleUntil = now + MAIN_ALWAYS_TRACK_UNMOUNT_SETTLE_SECONDS
+	mainAlwaysTrackSuppressedByMountError = nil
+	mainAlwaysTrackRetryAt = mainAlwaysTrackUnmountSettleUntil
+end
+
 MainAlwaysTrack_EnsureTracking = function()
 	local now
 	local missingSpells
@@ -3602,7 +3658,6 @@ MainAlwaysTrack_EnsureTracking = function()
 	local readyAt
 	local nextReadyAt
 	local spellToCast
-	local isMounted
 
 	if not MainAlwaysTrack_ShouldMaintainTracking() then
 		return
@@ -3610,20 +3665,23 @@ MainAlwaysTrack_EnsureTracking = function()
 
 	missingSpells = MainAlwaysTrack_GetMissingKnownSpells()
 	if Main_ArrayCount(missingSpells) <= 0 then
+		mainAlwaysTrackSuppressedByMountError = nil
+		mainAlwaysTrackRetryAt = nil
+		return
+	end
+
+	if mainAlwaysTrackSuppressedByMountError then
 		mainAlwaysTrackRetryAt = nil
 		return
 	end
 
 	now = GetTime and GetTime() or 0
-	isMounted = MainAlwaysTrack_IsPlayerMounted()
 
 	for spellIndex = 1, Main_ArrayCount(missingSpells) do
 		knownSpell = missingSpells[spellIndex]
 		readyAt = MainAlwaysTrack_GetReadyAt(knownSpell)
 		if not readyAt or readyAt <= now then
-			if isMounted and not knownSpell.castableWhileMounted then
-				readyAt = now + MAIN_ALWAYS_TRACK_MOUNT_RETRY_SECONDS
-			elseif knownSpell.spellId ~= MAIN_ALWAYS_TRACK_FIND_TREASURE_SPELL_ID or not mainAlwaysTrackFindTreasureNeedsStand then
+			if knownSpell.spellId ~= MAIN_ALWAYS_TRACK_FIND_TREASURE_SPELL_ID or not mainAlwaysTrackFindTreasureNeedsStand then
 				spellToCast = knownSpell
 				break
 			end
@@ -3645,10 +3703,12 @@ MainAlwaysTrack_EnsureTracking = function()
 end
 
 local function MainAlwaysTrack_OnWorldOrAuraChanged()
+	mainAlwaysTrackSuppressedByMountError = nil
 	MainAlwaysTrack_EnsureTracking()
 end
 
 local function MainAlwaysTrack_OnSpellsChanged()
+	mainAlwaysTrackSuppressedByMountError = nil
 	MainAlwaysTrack_RefreshKnownSpells()
 	MainAlwaysTrack_EnsureTracking()
 end
@@ -3667,6 +3727,7 @@ function MainAlwaysTrack:Init()
 end
 
 function MainAlwaysTrack:Enable()
+	mainAlwaysTrackSuppressedByMountError = nil
 	MainAlwaysTrack_RefreshKnownSpells()
 	MainAlwaysTrack_EnsureTracking()
 end
@@ -3676,11 +3737,18 @@ function MainAlwaysTrack:Disable()
 	mainAlwaysTrackLastCastSpellId = nil
 	mainAlwaysTrackLastCastAt = nil
 	mainAlwaysTrackFindTreasureNeedsStand = nil
+	mainAlwaysTrackSuppressedByMountError = nil
+	mainAlwaysTrackUnmountSettleUntil = nil
 end
 
 function MainAlwaysTrack:ApplyConfig()
+	mainAlwaysTrackSuppressedByMountError = nil
 	MainAlwaysTrack_RefreshKnownSpells()
 	MainAlwaysTrack_EnsureTracking()
+end
+
+function MainAlwaysTrack:OnMountStateChanged(mounted)
+	MainAlwaysTrack_OnMountStateChanged(mounted)
 end
 
 function MainAlwaysTrack:ProcessDeferredRefresh()

@@ -23,6 +23,9 @@ Main.API = {
 		requestRetrySeconds = 1,
 		maxRetries = 5,
 	},
+	mount = {
+		subscribeRetrySeconds = 5,
+	},
 }
 
 local function Main_APICreateDefaultVersionMap()
@@ -32,6 +35,7 @@ local function Main_APICreateDefaultVersionMap()
 		config = 0,
 		guild = 0,
 		pet = 0,
+		mount = 0,
 	}
 end
 
@@ -202,6 +206,12 @@ function Main.API:HandlePetUnsupported()
 	self.petUnsupported = 1
 end
 
+function Main.API:HandleMountUnsupported()
+	self.mountUnsupported = 1
+	self.mount.subscribePending = nil
+	self.mount.subscribed = nil
+end
+
 function Main.API:HandleApiVersionMessage(message)
 	local versions
 
@@ -216,6 +226,72 @@ function Main.API:HandleApiVersionMessage(message)
 	self.serverApiVersions = versions
 
 	self:RequestConfig(1)
+	self:SubscribeMountState(1)
+end
+
+function Main.API:SubscribeMountState(force)
+	local state
+	local now
+
+	if self.mountUnsupported then
+		return nil
+	end
+	if not self.handshake or not self.handshake.completed then
+		return nil
+	end
+	if not self:IsServerApiSupported("mount") then
+		self:HandleMountUnsupported()
+		return nil
+	end
+
+	state = self.mount
+	now = GetTime and GetTime() or 0
+
+	if state.subscribed and not force then
+		return 1
+	end
+	if state.subscribePending and not force then
+		return nil
+	end
+	if not force and state.lastSubscribeAt and (now - state.lastSubscribeAt) < (state.subscribeRetrySeconds or 5) then
+		return nil
+	end
+
+	if self:SendCommand("sub_mount") then
+		state.subscribePending = 1
+		state.lastSubscribeAt = now
+		return 1
+	end
+
+	return nil
+end
+
+function Main.API:IsPlayerMounted()
+	return self.mount and self.mount.mounted or nil
+end
+
+function Main.API:IsMountStatePending()
+	local now
+
+	if self.mountUnsupported or self.configUnsupported then
+		return nil
+	end
+	if self.mount and self.mount.known then
+		return nil
+	end
+	if not self.startedAt then
+		return 1
+	end
+	if self.handshake and self.handshake.completed then
+		return self:IsServerApiSupported("mount")
+	end
+
+	now = GetTime and GetTime() or 0
+	if (now - self.startedAt) < (self.fallbackDelaySeconds or 3) then
+		return 1
+	end
+
+	return nil
 end
 
 function Main.API:RequestConfig(force)
@@ -769,6 +845,42 @@ function Main.API:HandleErrorMessage(message)
 	end
 end
 
+function Main.API:HandleMountStateMessage(message)
+	local mountedText
+	local mounted
+	local previousKnown
+	local previousMounted
+	local module
+
+	_, _, mountedText = string.find(message, "^mnt,([^,]+)$")
+	if not mountedText then
+		return nil
+	end
+
+	mountedText = string.gsub(mountedText, "%s+", "")
+	if mountedText ~= "0" and mountedText ~= "1" then
+		return nil
+	end
+
+	previousKnown = self.mount.known
+	previousMounted = self.mount.mounted
+	mounted = mountedText == "1" and 1 or nil
+
+	self.mount.mounted = mounted
+	self.mount.known = 1
+	self.mount.subscribed = 1
+	self.mount.subscribePending = nil
+
+	if previousKnown and previousMounted ~= mounted and Main.GetModule then
+		module = Main.GetModule("always_track")
+		if module and module.OnMountStateChanged then
+			module:OnMountStateChanged(mounted, previousMounted)
+		end
+	end
+
+	return 1
+end
+
 function Main.API:ResetGuildRoster()
 	self.guildRoster = self.guildRoster or {}
 	self.guildRoster.members = {}
@@ -1001,6 +1113,8 @@ function Main.API:HandleChannelMessage(message, sender, channelName)
 		self:HandleApiVersionMessage(message)
 	elseif string.find(message, "^cfg,") then
 		self:HandleConfigMessage(message)
+	elseif string.find(message, "^mnt,") then
+		self:HandleMountStateMessage(message)
 	elseif string.find(message, "^gr,") then
 		self:HandleGuildRosterHeader(message)
 	elseif string.find(message, "^gm,") then
@@ -1019,6 +1133,7 @@ function Main.API:OnUpdate()
 	local auraState
 	local hs
 	local petState
+	local mountState
 
 	if not self.startedAt then
 		return
@@ -1060,6 +1175,16 @@ function Main.API:OnUpdate()
 
 	if not self.configUnsupported and not self.remoteLoaded and not self.requestPending then
 		self:RequestConfig()
+	end
+
+	-- Mount state subscription retry.
+	mountState = self.mount
+	if mountState.subscribePending and mountState.lastSubscribeAt and
+		(now - mountState.lastSubscribeAt) >= (mountState.subscribeRetrySeconds or 5) then
+		mountState.subscribePending = nil
+	end
+	if not self.mountUnsupported and not mountState.subscribed and not mountState.subscribePending then
+		self:SubscribeMountState()
 	end
 
 	-- Target distance timeout.
